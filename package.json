@@ -1,0 +1,28 @@
+{
+  "name": "discord-bot-template",
+  "version": "1.0.0",
+  "description": "Plantilla simple para un bot de Discord con discord.js",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node src/deploy-commands.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "template",
+    "discord.js"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "@distube/ytdl-core": "^4.16.12",
+    "discord.js": "^14.16.2",
+    "dotenv": "^16.4.5",
+    "play-dl": "^1.9.7",
+    "youtube-dl-exec": "^3.1.17",
+    "youtubei.js": "^18.1.0"
+  }
+}
