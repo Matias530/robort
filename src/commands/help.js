@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -7,19 +8,22 @@ module.exports = {
 
   async execute(interaction) {
     const commands = [
-      '/ping - Devuelve el tiempo de respuesta del bot.',
-      '/help - Muestra esta ayuda.',
-      '/play <url o texto> - Reproduce música de YouTube en tu canal de voz.',
-      '/queue - Muestra la lista actual de reproducción.',
-      '/skip - Salta la canción actual.',
-      '/pause - Pausa la reproducción.',
-      '/resume - Reanuda la reproducción.',
-      '/stop - Detiene y limpia la cola.',
-      '/clearqueue - Limpia la lista próxima sin cortar la canción actual.',
+      '🏓 `/ping` · ¿Sigo por aquí?',
+      '🎶 `/play` · Pon una canción o busca por nombre.',
+      '📋 `/queue` · Mira qué está sonando y qué sigue.',
+      '⏸️ `/pause` · Tómate una pausa.',
+      '▶️ `/resume` · Sigue escuchando.',
+      '⏭️ `/skip` · Pasa a la próxima.',
+      '⏹️ `/stop` · Para la música y vacía la cola.',
+      '🧹 `/clearqueue` · Quita las canciones pendientes.',
+      '🔁 `/loop` · Repite la canción actual.',
+      '🔊 `/join` · Entra a tu canal de voz.',
+      '👋 `/leave` · Sal del canal de voz.',
+      '💡 `/help` · Vuelve a ver esta lista.',
     ];
 
     await interaction.reply({
-      content: `Comandos disponibles:\n${commands.join('\n')}`,
+      embeds: [createResponseEmbed('🎛️ Música a tu manera', commands.join('\n'), 'info')],
       flags: MessageFlags.Ephemeral,
     });
   },

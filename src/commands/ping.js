@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -6,12 +7,10 @@ module.exports = {
     .setDescription('Devuelve el tiempo de respuesta del bot.'),
 
   async execute(interaction) {
-    const sent = await interaction.reply({
-      content: 'Calculando...',
-      fetchReply: true,
+    await interaction.deferReply();
+    const latency = Date.now() - interaction.createdTimestamp;
+    await interaction.editReply({
+      embeds: [createResponseEmbed('🏓 ¡Aquí estoy!', `Todo bien por aquí. Tardé **${latency} ms** en responder.`, 'success')],
     });
-
-    const latency = sent.createdTimestamp - interaction.createdTimestamp;
-    await interaction.editReply(`Pong! Latencia: ${latency}ms`);
   },
 };

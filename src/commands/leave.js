@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { getVoiceConnection } = require('@discordjs/voice');
 const { stopPlayback } = require('./play.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -13,14 +14,14 @@ module.exports = {
 
     if (!memberChannel) {
       return interaction.reply({
-        content: 'Debes estar en un canal de voz para usar este comando.',
+        embeds: [createResponseEmbed('🎙️ Primero entra a voz', 'Tienes que estar conectado al canal del bot para que me vaya.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
 
     if (!connection || connection.joinConfig.channelId !== memberChannel.id) {
       return interaction.reply({
-        content: 'Debes estar en el mismo canal de voz que el bot para usar este comando.',
+        embeds: [createResponseEmbed('🔊 Estamos en canales distintos', 'Ven al canal donde estoy y ahí sí me puedo ir.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -30,13 +31,13 @@ module.exports = {
       connection.destroy();
 
       return interaction.reply({
-        content: 'He abandonado el canal de voz.',
+        embeds: [createResponseEmbed('👋 Ya me fui', 'La música se detuvo y salí del canal.', 'success')],
         flags: MessageFlags.Ephemeral,
       });
     } catch (error) {
       console.error('Error al salir del canal:', error);
       return interaction.reply({
-        content: 'No pude abandonar el canal de voz.',
+        embeds: [createResponseEmbed('😕 No pude salir', 'Inténtalo de nuevo dentro de un momento.', 'error')],
         flags: MessageFlags.Ephemeral,
       });
     }

@@ -1,7 +1,16 @@
-const { SlashCommandBuilder, ActivityType, MessageFlags } = require('discord.js');
+const {
+  ActionRowBuilder,
+  ActivityType,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  SlashCommandBuilder,
+  MessageFlags,
+} = require('discord.js');
 const {
   AudioPlayerStatus,
   NoSubscriberBehavior,
+  StreamType,
   VoiceConnectionStatus,
   createAudioPlayer,
   createAudioResource,
@@ -9,8 +18,10 @@ const {
   getVoiceConnection,
   joinVoiceChannel,
 } = require('@discordjs/voice');
-const { Readable } = require('node:stream');
+const { spawn } = require('node:child_process');
+const { PassThrough } = require('node:stream');
 const youtubedl = require('youtube-dl-exec');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 const guildQueues = new Map();
 
@@ -58,6 +69,10 @@ function getGuildQueue(guildId) {
     state.isPaused = false;
   }
 
+  if (typeof state.loop !== 'boolean') {
+    state.loop = false;
+  }
+
   return state;
 }
 
@@ -73,6 +88,125 @@ function setNowPlayingActivity(client, title) {
 function clearNowPlayingActivity(client) {
   if (!client?.user) return;
   client.user.setActivity(null);
+}
+
+function createControlRow(state, disabled = false) {
+  const paused = state.player.state.status === AudioPlayerStatus.Paused;
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('music:toggle')
+      .setEmoji(paused ? '▶️' : '⏸️')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId('music:skip')
+      .setEmoji('⏭️')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId('music:stop')
+      .setEmoji('⏹️')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId('music:loop')
+      .setEmoji('🔁')
+      .setStyle(state.loop ? ButtonStyle.Success : ButtonStyle.Secondary)
+      .setDisabled(disabled),
+  );
+}
+
+function createNowPlayingEmbeds(track) {
+  const duration = formatDuration(track.duration);
+  const titleLimit = 255 - duration.length - 3;
+  const title = track.title.length > titleLimit
+    ? `${track.title.slice(0, titleLimit - 3)}...`
+    : track.title;
+  const embed = new EmbedBuilder()
+    .setColor('#5865F2')
+    .setTitle(`🎵 ${title}  ⏱️ ${duration}`)
+    .setURL(track.url);
+
+  if (track.thumbnail) {
+    embed.setThumbnail(track.thumbnail);
+  }
+
+  return [embed];
+}
+
+async function updateNowPlayingControls(guildId) {
+  const state = getGuildQueue(guildId);
+  if (!state?.controlMessage || !state.current) return false;
+
+  try {
+    await state.controlMessage.edit({ components: [createControlRow(state)] });
+    return true;
+  } catch (error) {
+    console.error('No pude actualizar los botones de reproducción:', error);
+    return false;
+  }
+}
+
+async function disableNowPlayingControls(state) {
+  if (!state?.controlMessage) return;
+
+  state.controlCollector?.stop();
+
+  try {
+    await state.controlMessage.edit({ components: [createControlRow(state, true)] });
+  } catch (error) {
+    console.error('No pude desactivar los botones de reproducción:', error);
+  }
+
+  state.controlMessage = null;
+  state.controlCollector = null;
+}
+
+async function publishNowPlaying(state, track, initialInteraction) {
+  const payload = {
+    embeds: createNowPlayingEmbeds(track),
+    components: [createControlRow(state)],
+  };
+  const message = initialInteraction
+    ? await initialInteraction.editReply(payload)
+    : await state.textChannel.send(payload);
+
+  state.controlMessage = message;
+  state.controlCollector = message.createMessageComponentCollector({
+    filter: component => component.customId.startsWith('music:'),
+  });
+
+  state.controlCollector.on('collect', async component => {
+    try {
+      if (component.member?.voice?.channelId !== state.connection.joinConfig.channelId) {
+        return await component.reply({
+          embeds: [createResponseEmbed('🔊 Ven a escuchar conmigo', 'Estos controles funcionan cuando estás en el mismo canal de voz que yo.', 'warning')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      await component.deferUpdate();
+
+      if (component.customId === 'music:toggle') {
+        if (state.player.state.status === AudioPlayerStatus.Paused) {
+          resumePlayback(state.guildId);
+        } else {
+          pausePlayback(state.guildId);
+        }
+        await updateNowPlayingControls(state.guildId);
+      } else if (component.customId === 'music:skip') {
+        skipTrack(state.guildId);
+      } else if (component.customId === 'music:stop') {
+        stopPlayback(state.guildId);
+      } else if (component.customId === 'music:loop') {
+        toggleLoop(state.guildId);
+        await updateNowPlayingControls(state.guildId);
+      }
+    } catch (error) {
+      console.error('Error al ejecutar un botón de reproducción:', error);
+    }
+  });
 }
 
 function pausePlayback(guildId) {
@@ -115,8 +249,18 @@ function skipTrack(guildId) {
   const state = getGuildQueue(guildId);
   if (!state || !state.player) return false;
   state.isPaused = false;
+  state.loop = false;
+  state.skipRequested = true;
   state.player.stop();
   return true;
+}
+
+function toggleLoop(guildId) {
+  const state = getGuildQueue(guildId);
+  if (!state?.current) return null;
+
+  state.loop = !state.loop;
+  return state.loop;
 }
 
 function stopPlayback(guildId) {
@@ -124,6 +268,7 @@ function stopPlayback(guildId) {
   if (!state) return false;
 
   state.isPaused = false;
+  disableNowPlayingControls(state);
   state.player.stop();
   if (state.connection) state.connection.destroy();
   clearNowPlayingActivity(state.client);
@@ -188,59 +333,103 @@ async function getAudioResourceForVideo(video) {
     throw new Error('No se pudo reconstruir la URL del video.');
   }
 
-  const streamUrl = await youtubedl(videoUrl, {
-    getUrl: true,
-    format: 'bestaudio/best',
-    noWarnings: true,
-    noCheckCertificates: true,
-    noPlaylist: true,
+  const process = spawn(youtubedl.constants.YOUTUBE_DL_PATH, [
+    '--quiet',
+    '--no-warnings',
+    '--no-progress',
+    '--no-playlist',
+    '--format',
+    'bestaudio[ext=webm][acodec=opus]',
+    '--retries',
+    '5',
+    '--fragment-retries',
+    '5',
+    '--output',
+    '-',
+    '--',
+    videoUrl,
+  ], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const audioStream = new PassThrough();
+  let stderr = '';
+
+  process.stderr.setEncoding('utf8');
+  process.stderr.on('data', chunk => {
+    stderr = `${stderr}${chunk}`.slice(-3000);
+  });
+  process.stdout.pipe(audioStream);
+  process.once('error', error => audioStream.destroy(error));
+  process.once('close', code => {
+    if (code !== 0) {
+      audioStream.destroy(new Error(`yt-dlp terminó con código ${code}: ${stderr.trim()}`));
+    }
+  });
+  audioStream.once('close', () => {
+    if (!audioStream.writableFinished && process.exitCode === null && process.signalCode === null) {
+      process.kill();
+    }
   });
 
-  const response = await fetch(streamUrl);
-  if (!response.ok) {
-    throw new Error(`No pude obtener el stream de audio. Código HTTP ${response.status}`);
-  }
-
-  const contentType = response.headers.get('content-type') || 'audio/webm';
-  const inputType = contentType.includes('webm') ? 'webm/opus' : contentType.includes('mpeg') ? 'audio/mpeg' : 'webm/opus';
-  const nodeStream = Readable.fromWeb(response.body);
-
-  return createAudioResource(nodeStream, { inputType });
+  return createAudioResource(audioStream, { inputType: StreamType.WebmOpus });
 }
 
-async function playNextTrack(guildId) {
+async function playNextTrack(guildId, initialInteraction = null) {
   const state = getGuildQueue(guildId);
 
-  if (!state || !state.player) return;
+  if (!state || !state.player || state.loadingTrack) return;
 
   if (state.isPaused) return;
 
-  if (state.queue.length === 0) {
-    state.current = null;
-    state.isPaused = false;
-    clearNowPlayingActivity(state.client);
-    return;
-  }
-
-  const nextTrack = state.queue.shift();
+  state.loadingTrack = true;
+  await disableNowPlayingControls(state);
+  state.current = null;
 
   try {
-    const resource = await getAudioResourceForVideo(nextTrack);
-    state.current = {
-      ...nextTrack,
-      url: nextTrack.url || resolveTrackUrl(nextTrack, nextTrack.id),
-    };
-    state.isPaused = false;
-    state.player.play(resource);
-    setNowPlayingActivity(state.client, state.current.title);
-  } catch (error) {
-    console.error('Error reproduciendo la siguiente canción:', error);
-    if (state.queue.length > 0) {
-      playNextTrack(guildId);
-    } else {
-      state.current = null;
-      clearNowPlayingActivity(state.client);
+    while (state.queue.length > 0) {
+      const nextTrack = state.queue.shift();
+
+      try {
+        const resource = await getAudioResourceForVideo(nextTrack);
+        if (guildQueues.get(guildId) !== state) return;
+
+        state.current = {
+          ...nextTrack,
+          url: nextTrack.url || resolveTrackUrl(nextTrack, nextTrack.id),
+        };
+        state.isPaused = false;
+        state.player.play(resource);
+        setNowPlayingActivity(state.client, state.current.title);
+
+        try {
+          await publishNowPlaying(state, state.current, initialInteraction);
+        } catch (error) {
+          console.error('No pude enviar el panel de reproducción:', error);
+          if (initialInteraction) {
+            await initialInteraction.editReply({
+              embeds: [createResponseEmbed('🎶 Ya está sonando', `**${state.current.title}**`, 'success')],
+            });
+          }
+        }
+        return;
+      } catch (error) {
+        console.error('Error reproduciendo la siguiente canción:', error);
+        if (initialInteraction) {
+          await initialInteraction.editReply({
+            embeds: [createResponseEmbed('😕 Esa no salió', 'Voy a probar con la siguiente canción de la cola.', 'warning')],
+          });
+          initialInteraction = null;
+        }
+      }
     }
+
+    state.isPaused = false;
+    clearNowPlayingActivity(state.client);
+  } catch (error) {
+    console.error('Error avanzando la cola:', error);
+  } finally {
+    state.loadingTrack = false;
   }
 }
 
@@ -259,16 +448,18 @@ module.exports = {
   pausePlayback,
   resumePlayback,
   skipTrack,
+  toggleLoop,
   stopPlayback,
   clearUpcomingQueue,
   setNowPlayingActivity,
+  updateNowPlayingControls,
 
   async execute(interaction) {
     const voiceChannel = interaction.member?.voice?.channel;
 
     if (!voiceChannel) {
       return interaction.reply({
-        content: 'Debes estar en un canal de voz para usar este comando.',
+        embeds: [createResponseEmbed('🎙️ Entra a un canal de voz', 'Dime qué quieres escuchar cuando estés conectado y pongo la música.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -288,13 +479,17 @@ module.exports = {
       const video = await resolveVideo(query);
 
       if (!video) {
-        return interaction.editReply('No encontré resultados para esa búsqueda.');
+        return interaction.editReply({
+          embeds: [createResponseEmbed('🔎 No encontré esa canción', 'Prueba con otro nombre o pega un enlace de YouTube.', 'warning')],
+        });
       }
 
       const resolvedUrl = resolveTrackUrl(video, query);
 
       if (!resolvedUrl) {
-        return interaction.editReply('No pude obtener una URL válida para esta canción.');
+        return interaction.editReply({
+          embeds: [createResponseEmbed('🔗 No pude abrir ese enlace', 'Prueba con un enlace de YouTube o busca la canción por nombre.', 'warning')],
+        });
       }
 
       const videoTitle = video.title || video.video_details?.title || 'Sin título';
@@ -340,12 +535,38 @@ module.exports = {
 
         player.on('error', error => {
           console.error('Error del reproductor:', error);
+          const currentState = getGuildQueue(interaction.guild.id);
+          if (!currentState?.current) return;
+
+          const failedTrack = currentState.current;
+          const retries = failedTrack.streamRetries || 0;
+          if (retries < 1) {
+            currentState.queue.unshift({ ...failedTrack, streamRetries: retries + 1 });
+            console.warn(`Reintentando la pista después de un error de stream: ${failedTrack.title}`);
+          } else {
+            console.error(`Se omite la pista tras fallar el reintento: ${failedTrack.title}`);
+          }
+
+          currentState.current = null;
+          currentState.isPaused = false;
+          currentState.player.stop(true);
         });
 
         player.on(AudioPlayerStatus.Idle, () => {
           const currentState = getGuildQueue(interaction.guild.id);
           if (!currentState || currentState.isPaused) return;
+
+          if (currentState.skipRequested) {
+            currentState.skipRequested = false;
+          } else if (currentState.loop && currentState.current) {
+            currentState.queue.unshift({ ...currentState.current, streamRetries: 0 });
+          }
+
           playNextTrack(interaction.guild.id);
+        });
+
+        player.on('stateChange', () => {
+          updateNowPlayingControls(interaction.guild.id);
         });
 
         connection.subscribe(player);
@@ -355,8 +576,15 @@ module.exports = {
           player,
           queue: [],
           current: null,
+          loop: false,
+          skipRequested: false,
           client: interaction.client,
           isPaused: false,
+          guildId: interaction.guild.id,
+          textChannel: interaction.channel,
+          controlMessage: null,
+          controlCollector: null,
+          loadingTrack: false,
         };
 
         guildQueues.set(interaction.guild.id, state);
@@ -368,27 +596,16 @@ module.exports = {
         AudioPlayerStatus.AutoPaused,
       ].includes(state.player.state.status);
 
-      if (isCurrentlyPlaying || state.player.state.status === AudioPlayerStatus.Paused) {
+      if (isCurrentlyPlaying || state.player.state.status === AudioPlayerStatus.Paused || state.loadingTrack) {
         state.queue.push(track);
         const queueSize = state.queue.length;
-        return interaction.editReply(`Se agregó a la cola: **${track.title}**. Posición: **${queueSize}**.`);
+        return interaction.editReply({
+          embeds: [createResponseEmbed('➕ Va después', `**${track.title}** quedó en el puesto **${queueSize}**.`, 'success')],
+        });
       }
 
       state.queue.push(track);
-
-      const firstTrack = state.queue.shift();
-      try {
-        const resource = await getAudioResourceForVideo(firstTrack);
-        state.current = { ...firstTrack, url: firstTrack.url || resolveTrackUrl(firstTrack, firstTrack.id) };
-        state.isPaused = false;
-        state.player.play(resource);
-        setNowPlayingActivity(state.client, state.current.title);
-
-        return interaction.editReply(`Reproduciendo: **${state.current.title}**`);
-      } catch (error) {
-        console.error('Error al reproducir la primera canción:', error);
-        return interaction.editReply('No pude reproducir ese audio. Verifica la URL o intenta con otra búsqueda.');
-      }
+      await playNextTrack(interaction.guild.id, interaction);
     } catch (error) {
       console.error(error);
       const isUnknownInteraction = error?.code === 10062 || error?.status === 404 || error?.message === 'Unknown interaction';
@@ -396,7 +613,9 @@ module.exports = {
 
       try {
         if (!interaction.isRepliable()) return;
-        await interaction.editReply('No pude reproducir ese audio. Verifica la URL o intenta con otra búsqueda.');
+        await interaction.editReply({
+          embeds: [createResponseEmbed('😕 No pude poner esa canción', 'Prueba con otra búsqueda o con otro enlace.', 'error')],
+        });
       } catch (replyError) {
         const isUnknownInteractionReply = replyError?.code === 10062 || replyError?.status === 404 || replyError?.message === 'Unknown interaction';
         if (!isUnknownInteractionReply) {

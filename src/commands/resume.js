@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
-const { resumePlayback } = require('./play.js');
+const { resumePlayback, updateNowPlayingControls } = require('./play.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,14 +12,16 @@ module.exports = {
 
     if (!ok) {
       return interaction.reply({
-        content: 'No hay ninguna canción pausada en este servidor.',
+        embeds: [createResponseEmbed('🎶 No hay nada en pausa', 'Cuando pauses una canción, podrás retomarla desde aquí.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
 
     await interaction.reply({
-      content: 'Reproducción reanudada.',
+      embeds: [createResponseEmbed('▶️ De vuelta a la música', 'La canción continúa desde donde quedó.', 'success')],
       flags: MessageFlags.Ephemeral,
     });
+
+    await updateNowPlayingControls(interaction.guild.id);
   },
 };

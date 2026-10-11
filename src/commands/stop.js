@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { stopPlayback } = require('./play.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,13 +12,13 @@ module.exports = {
 
     if (!ok) {
       return interaction.reply({
-        content: 'No hay ninguna reproducción activa en este servidor.',
+        embeds: [createResponseEmbed('🎵 No hay música activa', 'Cuando quieras escuchar algo, prueba `/play`.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
 
     await interaction.reply({
-      content: 'La reproducción fue detenida y la cola fue limpiada.',
+      embeds: [createResponseEmbed('⏹️ Música detenida', 'Paré la canción y dejé la cola vacía.', 'success')],
       flags: MessageFlags.Ephemeral,
     });
   },

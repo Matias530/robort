@@ -2,6 +2,7 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createResponseEmbed } = require('./utils/response-embed.js');
 
 const client = new Client({
   intents: [
@@ -52,12 +53,12 @@ client.on('interactionCreate', async interaction => {
 
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
-          content: 'Hubo un error al ejecutar este comando.',
+          embeds: [createResponseEmbed('😕 Algo no salió bien', 'Prueba otra vez en un momento.', 'error')],
           flags: MessageFlags.Ephemeral,
         });
       } else {
         await interaction.reply({
-          content: 'Hubo un error al ejecutar este comando.',
+          embeds: [createResponseEmbed('😕 Algo no salió bien', 'Prueba otra vez en un momento.', 'error')],
           flags: MessageFlags.Ephemeral,
         });
       }

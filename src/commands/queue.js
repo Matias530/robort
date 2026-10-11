@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getGuildQueue } = require('./play.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -12,7 +13,7 @@ module.exports = {
 
     if (!hasQueueEntries) {
       return interaction.reply({
-        content: 'No hay ninguna canción en la cola en este servidor.',
+        embeds: [createResponseEmbed('📭 La cola está vacía', 'Agrega una canción con `/play` y aquí te muestro qué sigue.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -21,7 +22,7 @@ module.exports = {
 
     if (queue.current) {
       items.push(
-        `🎵 Reproduciendo ahora: **${queue.current.title}** • ${formatDuration(queue.current.duration)}`,
+        `🎵 **Sonando ahora**\n${queue.current.title}  ·  ⏱️ ${formatDuration(queue.current.duration)}`,
       );
     }
 
@@ -34,8 +35,9 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
-      .setTitle('📋 Cola de reproducción')
+      .setTitle('🎶 Lo que viene')
       .setDescription(items.join('\n\n'))
+      .setFooter({ text: queue.loop ? '🔁 La canción actual está en repetición' : `${queue.queue.length} canciones esperando` })
       .setTimestamp();
 
     const thumbnail = queue.current?.thumbnail || queue.queue[0]?.thumbnail;

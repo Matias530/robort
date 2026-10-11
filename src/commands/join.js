@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { VoiceConnectionStatus, entersState, getVoiceConnection, joinVoiceChannel } = require('@discordjs/voice');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,7 +12,7 @@ module.exports = {
 
     if (!voiceChannel) {
       return interaction.reply({
-        content: 'Debes estar en un canal de voz para usar este comando.',
+        embeds: [createResponseEmbed('🎙️ Entra a un canal de voz', 'Cuando estés conectado, me uno contigo.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -21,10 +22,12 @@ module.exports = {
 
     if (currentChannelId === voiceChannel.id) {
       return interaction.reply({
-        content: 'Ya estoy en tu canal de voz.',
+        embeds: [createResponseEmbed('🔊 Ya estoy aquí', 'Ya compartimos canal, ¡ponemos música cuando quieras!', 'success')],
         flags: MessageFlags.Ephemeral,
       });
     }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
       if (existingConnection && existingConnection.joinConfig.channelId !== voiceChannel.id) {
@@ -46,15 +49,13 @@ module.exports = {
 
       await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
 
-      return interaction.reply({
-        content: `Conectado a **${voiceChannel.name}**.`,
-        flags: MessageFlags.Ephemeral,
+      return interaction.editReply({
+        embeds: [createResponseEmbed('🔊 ¡Ya llegué!', `Estoy contigo en **${voiceChannel.name}**.`, 'success')],
       });
     } catch (error) {
       console.error('Error al unirse al canal:', error);
-      return interaction.reply({
-        content: 'No pude unirme a tu canal de voz.',
-        flags: MessageFlags.Ephemeral,
+      return interaction.editReply({
+        embeds: [createResponseEmbed('😕 No pude entrar', 'Prueba otra vez en un momento.', 'error')],
       });
     }
   },

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { skipTrack } = require('./play.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,13 +12,13 @@ module.exports = {
 
     if (!ok) {
       return interaction.reply({
-        content: 'No hay ninguna canción reproduciéndose en este servidor.',
+        embeds: [createResponseEmbed('🎧 No hay ninguna canción', 'Cuando haya música sonando, podrás pasar a la siguiente.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
 
     await interaction.reply({
-      content: 'Canción saltada.',
+      embeds: [createResponseEmbed('⏭️ Siguiente canción', 'Listo, seguimos con la próxima de la cola.', 'success')],
       flags: MessageFlags.Ephemeral,
     });
   },

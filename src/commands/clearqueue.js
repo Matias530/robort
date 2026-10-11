@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { clearUpcomingQueue } = require('./play.js');
+const { createResponseEmbed } = require('../utils/response-embed.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,13 +12,13 @@ module.exports = {
 
     if (removed === 0) {
       return interaction.reply({
-        content: 'No hay canciones pendientes en la cola.',
+        embeds: [createResponseEmbed('📭 La cola está vacía', 'No hay canciones esperando detrás de la actual.', 'warning')],
         flags: MessageFlags.Ephemeral,
       });
     }
 
     await interaction.reply({
-      content: `Se eliminaron ${removed} canciones de la cola.`,
+      embeds: [createResponseEmbed('🧹 Cola despejada', `Quité ${removed} ${removed === 1 ? 'canción' : 'canciones'} pendientes. La que está sonando sigue igual.`, 'success')],
       flags: MessageFlags.Ephemeral,
     });
   },
