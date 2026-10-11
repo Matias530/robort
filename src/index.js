@@ -10,6 +10,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -31,6 +32,24 @@ const handleClientReady = () => {
 client.once('clientReady', handleClientReady);
 
 client.on('interactionCreate', async interaction => {
+  if (interaction.isAutocomplete()) {
+    const command = client.commands.get(interaction.commandName);
+
+    try {
+      if (command?.autocomplete) {
+        await command.autocomplete(interaction);
+      } else {
+        await interaction.respond([]);
+      }
+    } catch (error) {
+      console.error(`Error buscando opciones para /${interaction.commandName}:`, error);
+      if (!interaction.responded) {
+        await interaction.respond([]).catch(() => {});
+      }
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const command = client.commands.get(interaction.commandName);

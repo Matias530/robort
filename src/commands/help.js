@@ -19,6 +19,7 @@ module.exports = {
       '🔁 `/loop` · Repite la canción actual.',
       '🔊 `/join` · Entra a tu canal de voz.',
       '👋 `/leave` · Sal del canal de voz.',
+      '🍀 `/luck` · Desea suerte a ti o busca a alguien por nombre.',
       '💡 `/help` · Vuelve a ver esta lista.',
     ];
 
