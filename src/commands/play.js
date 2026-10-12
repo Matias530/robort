@@ -1,9 +1,9 @@
 const {
   ActionRowBuilder,
-  ActivityType,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  Routes,
   SlashCommandBuilder,
   MessageFlags,
 } = require('discord.js');
@@ -76,18 +76,19 @@ function getGuildQueue(guildId) {
   return state;
 }
 
-function setNowPlayingActivity(client, title) {
-  if (!client?.user) return;
+function setVoiceChannelStatus(state, title = null) {
+  if (!state?.client?.rest || !state.connection) return Promise.resolve();
 
-  client.user.setActivity({
-    name: `Reproduciendo ${title}`,
-    type: ActivityType.Listening,
-  });
-}
+  const channelId = state.connection.joinConfig.channelId;
+  const status = title ? `🔊 Escuchando: ${title}`.slice(0, 500) : null;
+  state.voiceStatusUpdate = (state.voiceStatusUpdate || Promise.resolve())
+    .catch(() => {})
+    .then(() => state.client.rest.put(Routes.channelVoiceStatus(channelId), { body: { status } }))
+    .catch(error => {
+      console.error('No pude actualizar el estado del canal de voz:', error);
+    });
 
-function clearNowPlayingActivity(client) {
-  if (!client?.user) return;
-  client.user.setActivity(null);
+  return state.voiceStatusUpdate;
 }
 
 function createControlRow(state, disabled = false) {
@@ -198,7 +199,7 @@ async function publishNowPlaying(state, track, initialInteraction) {
       } else if (component.customId === 'music:skip') {
         skipTrack(state.guildId);
       } else if (component.customId === 'music:stop') {
-        stopPlayback(state.guildId);
+        await stopPlayback(state.guildId);
       } else if (component.customId === 'music:loop') {
         toggleLoop(state.guildId);
         await updateNowPlayingControls(state.guildId);
@@ -263,16 +264,19 @@ function toggleLoop(guildId) {
   return state.loop;
 }
 
-function stopPlayback(guildId) {
+async function stopPlayback(guildId) {
   const state = getGuildQueue(guildId);
   if (!state) return false;
 
   state.isPaused = false;
-  disableNowPlayingControls(state);
-  state.player.stop();
-  if (state.connection) state.connection.destroy();
-  clearNowPlayingActivity(state.client);
+  state.loop = false;
+  state.queue.length = 0;
+  state.current = null;
   guildQueues.delete(guildId);
+  disableNowPlayingControls(state);
+  state.player.stop(true);
+  await setVoiceChannelStatus(state);
+  if (state.connection) state.connection.destroy();
   return true;
 }
 
@@ -400,7 +404,7 @@ async function playNextTrack(guildId, initialInteraction = null) {
         };
         state.isPaused = false;
         state.player.play(resource);
-        setNowPlayingActivity(state.client, state.current.title);
+        await setVoiceChannelStatus(state, state.current.title);
 
         try {
           await publishNowPlaying(state, state.current, initialInteraction);
@@ -425,7 +429,7 @@ async function playNextTrack(guildId, initialInteraction = null) {
     }
 
     state.isPaused = false;
-    clearNowPlayingActivity(state.client);
+    await setVoiceChannelStatus(state);
   } catch (error) {
     console.error('Error avanzando la cola:', error);
   } finally {
@@ -451,7 +455,7 @@ module.exports = {
   toggleLoop,
   stopPlayback,
   clearUpcomingQueue,
-  setNowPlayingActivity,
+  setVoiceChannelStatus,
   updateNowPlayingControls,
 
   async execute(interaction) {

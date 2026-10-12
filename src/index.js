@@ -1,8 +1,13 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
+const { ActivityType, Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
+const { getVoiceConnection } = require('@discordjs/voice');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createResponseEmbed } = require('./utils/response-embed.js');
+const { getGuildQueue, stopPlayback } = require('./commands/play.js');
+
+const emptyVoiceTimeoutMs = 5 * 60 * 1000;
+const emptyVoiceTimers = new Map();
 
 const client = new Client({
   intents: [
@@ -26,10 +31,69 @@ for (const file of fs.readdirSync(commandsPath).filter(file => file.endsWith('.j
 }
 
 const handleClientReady = () => {
+  client.user.setActivity('Geometry Dash 2.3', { type: ActivityType.Playing });
   console.log(`Bot conectado como ${client.user.tag}`);
 };
 
 client.once('clientReady', handleClientReady);
+
+function clearEmptyVoiceTimer(guildId) {
+  const timer = emptyVoiceTimers.get(guildId);
+  if (!timer) return;
+
+  clearTimeout(timer.timeout);
+  emptyVoiceTimers.delete(guildId);
+}
+
+client.on('voiceStateUpdate', (oldState, newState) => {
+  const guild = newState.guild;
+  const connection = getVoiceConnection(guild.id);
+
+  if (!connection) {
+    clearEmptyVoiceTimer(guild.id);
+    return;
+  }
+
+  const channelId = connection.joinConfig.channelId;
+  if (oldState.channelId !== channelId && newState.channelId !== channelId) return;
+
+  const voiceChannel = guild.channels.cache.get(channelId);
+  const hasListeners = voiceChannel?.members.some(member => !member.user.bot) ?? false;
+
+  if (hasListeners) {
+    clearEmptyVoiceTimer(guild.id);
+    return;
+  }
+
+  const currentTimer = emptyVoiceTimers.get(guild.id);
+  if (currentTimer?.channelId === channelId) return;
+  clearEmptyVoiceTimer(guild.id);
+
+  const timeout = setTimeout(async () => {
+    emptyVoiceTimers.delete(guild.id);
+
+    const activeConnection = getVoiceConnection(guild.id);
+    if (!activeConnection || activeConnection.joinConfig.channelId !== channelId) return;
+
+    const activeChannel = guild.channels.cache.get(channelId);
+    const hasReturnedListeners = activeChannel?.members.some(member => !member.user.bot) ?? false;
+    if (hasReturnedListeners) return;
+
+    const playback = getGuildQueue(guild.id);
+    if (playback) {
+      playback.queue.length = 0;
+      playback.loop = false;
+      playback.current = null;
+      await stopPlayback(guild.id);
+    } else {
+      activeConnection.destroy();
+    }
+
+    console.log(`Canal de voz vacío durante 5 minutos en ${guild.name}; bot desconectado.`);
+  }, emptyVoiceTimeoutMs);
+
+  emptyVoiceTimers.set(guild.id, { channelId, timeout });
+});
 
 client.on('interactionCreate', async interaction => {
   if (interaction.isAutocomplete()) {

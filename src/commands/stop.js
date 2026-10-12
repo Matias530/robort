@@ -8,7 +8,7 @@ module.exports = {
     .setDescription('Detiene la reproducción y limpia la cola.'),
 
   async execute(interaction) {
-    const ok = stopPlayback(interaction.guild.id);
+    const ok = await stopPlayback(interaction.guild.id);
 
     if (!ok) {
       return interaction.reply({

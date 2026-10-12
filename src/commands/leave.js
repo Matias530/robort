@@ -27,7 +27,7 @@ module.exports = {
     }
 
     try {
-      stopPlayback(interaction.guild.id);
+      await stopPlayback(interaction.guild.id);
       connection.destroy();
 
       return interaction.reply({
